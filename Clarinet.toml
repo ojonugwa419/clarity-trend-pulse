@@ -8,6 +8,10 @@ requirements = []
 path = "contracts/trend-pulse.clar"
 depends_on = []
 
+[contracts.trend-rewards]
+path = "contracts/trend-rewards.clar"
+depends_on = []
+
 [repl]
 costs_version = 2
 parser_version = 2
