@@ -29,6 +29,17 @@
 
 (define-map user-votes {user: principal, trend-id: uint} bool)
 (define-map user-trend-count principal uint)
+(define-map category-trends (string-ascii 20) (list 50 uint))
+
+;; Events
+(define-data-var last-event-id uint u0)
+
+(define-map events uint {
+  event-type: (string-ascii 20),
+  trend-id: uint,
+  user: principal,
+  timestamp: uint
+})
 
 ;; Private Functions
 (define-private (is-trend-active (trend-id uint))
@@ -42,6 +53,16 @@
     (>= u50 (len title))
     (> (len category) u0)
     (>= u20 (len category))))
+
+(define-private (emit-event (event-type (string-ascii 20)) (trend-id uint))
+  (let ((event-id (var-get last-event-id)))
+    (map-set events event-id {
+      event-type: event-type,
+      trend-id: trend-id,
+      user: tx-sender,
+      timestamp: block-height
+    })
+    (var-set last-event-id (+ event-id u1))))
 
 ;; Public Functions
 (define-public (submit-trend (title (string-ascii 50)) (category (string-ascii 20)))
@@ -65,6 +86,10 @@
     
     (map-set user-trend-count tx-sender (+ user-trends u1))
     (var-set total-trends (+ trend-id u1))
+    (emit-event "trend-submitted" trend-id)
+    
+    ;; Reward the submission
+    (contract-call? .trend-rewards reward-submission tx-sender)
     (ok trend-id)))
 
 (define-public (vote-trend (trend-id uint))
@@ -79,6 +104,8 @@
         (try! (map-set trends trend-id 
           (merge trend {votes: (+ (get votes trend) u1)})))
         (map-insert user-votes vote-key true)
+        (emit-event "trend-voted" trend-id)
+        (contract-call? .trend-rewards reward-vote tx-sender)
         (ok true))
       err-trend-not-found)))
 
@@ -97,3 +124,18 @@
 
 (define-read-only (is-paused)
   (ok (var-get contract-paused)))
+
+(define-read-only (get-trends-by-category (category (string-ascii 20)) (limit uint))
+  (let ((all-trends (var-get total-trends)))
+    (filter is-trend-active 
+      (list-trends-helper all-trends (- all-trends u1) limit category))))
+
+(define-private (list-trends-helper (total uint) (current uint) (limit uint) (category (string-ascii 20)))
+  (if (or (is-eq current u0) (is-eq limit u0))
+    (list current)
+    (match (map-get? trends current)
+      trend (if (is-eq (get category trend) category)
+             (concat (list current) 
+                    (list-trends-helper total (- current u1) (- limit u1) category))
+             (list-trends-helper total (- current u1) limit category))
+      (list-trends-helper total (- current u1) limit category))))
